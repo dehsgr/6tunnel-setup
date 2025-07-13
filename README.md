@@ -34,28 +34,27 @@ The script also takes care of required dependencies, optionally installs/uninsta
 - Linux (Debian/Ubuntu recommended)
 - root privileges
 - Bash
+- `curl` (to use the one-liner below)
 - `dialog` and `6tunnel` (the script can install these automatically)
 
 ---
 
 ## 🔧 Installation & Usage
 
-### 📥 Download the script
+### 🚀 Run the script
 
-Clone the repository:
+Run the following **one-liner** as **root** to download and execute the script directly:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/dehsgr/6tunnel-setup/main/6tunnel-setup.sh)
+```
+
+Alternatively, clone the repository manually:
+
 ```bash
 git clone https://github.com/dehsgr/6tunnel-setup.git
 cd 6tunnel-setup
-```
-
-Make the script executable:
-```bash
 chmod +x 6tunnel-setup.sh
-```
-
-### 🚀 Run the script
-Run the script as **root**:
-```bash
 sudo ./6tunnel-setup.sh
 ```
 
