@@ -145,8 +145,13 @@ function modify() {
             new_tgt_addr=$(echo "$new_result" | sed -n 2p)
             new_tgt_port=$(echo "$new_result" | sed -n 3p)
 
+            # Validation: all empty cancels, all filled required
+            if [[ -z "$new_src" && -z "$new_tgt_addr" && -z "$new_tgt_port" ]]; then
+                dialog --msgbox "Add cancelled." 6 40
+                continue
+            fi
             if [[ -z "$new_src" || -z "$new_tgt_addr" || -z "$new_tgt_port" ]]; then
-                dialog --msgbox "All fields are required. Entry not added." 6 50
+                dialog --msgbox "All fields must be filled or all empty to cancel. Entry not added." 6 60
                 continue
             fi
 
@@ -176,6 +181,16 @@ function modify() {
                 new_src=$(echo "$new_result" | sed -n 1p)
                 new_tgt_addr=$(echo "$new_result" | sed -n 2p)
                 new_tgt_port=$(echo "$new_result" | sed -n 3p)
+
+                # Validation: all empty cancels edit, all filled required
+                if [[ -z "$new_src" && -z "$new_tgt_addr" && -z "$new_tgt_port" ]]; then
+                    dialog --msgbox "Edit cancelled, entry unchanged." 6 40
+                    continue
+                fi
+                if [[ -z "$new_src" || -z "$new_tgt_addr" || -z "$new_tgt_port" ]]; then
+                    dialog --msgbox "All fields must be filled or all empty to cancel. Entry unchanged." 6 60
+                    continue
+                fi
 
                 sed -i "${choice}s/.*/$new_src $new_tgt_addr $new_tgt_port/" "$CONFIG_FILE"
                 restart_service
