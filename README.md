@@ -1,7 +1,7 @@
 # 6tunnel-setup
 
 **Version:** 1.0.0  
-**License:** MIT  
+**License:** ISC  
 **Author:** [dehsgr](https://github.com/dehsgr)
 
 ## 📖 Overview
