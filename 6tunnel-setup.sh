@@ -1,235 +1,177 @@
 #!/bin/bash
+# 6tunnel-setup.sh
+# Version: 1.0.0
 
-SCRIPT_VERSION="1.0.0"
+VERSION="1.0.0"
+CONFIG_FILE="/etc/6tunnel-setup.conf"
+BACKUP_FILE="/etc/6tunnel-setup.conf.bak"
+SYSTEMD_UNIT="/etc/systemd/system/6tunnel-setup.service"
 
-SERVICE_SCRIPT="/usr/local/bin/6tunnel-start.sh"
-SYSTEMD_UNIT="/etc/systemd/system/6tunnel-start.service"
-CONFIG_FILE="$SERVICE_SCRIPT.config"
-LOGFILE="/var/log/6tunnel-setup.log"
-BACKUP_DIR="/var/backups"
-AUTO_MODE=0
-INSTALLED_PACKAGES=()
+set -e
 
-trap clear EXIT
-
-log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOGFILE"
+function cleanup {
+    tput sgr0   # reset terminal colors
+    clear
 }
+trap cleanup EXIT
 
-check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        echo "This script must be run as root!"
+function check_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "This script must be run as root."
         exit 1
     fi
 }
 
-check_command() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-detect_pkg_manager() {
-    if check_command apt-get; then echo "apt-get"
-    elif check_command dnf; then echo "dnf"
-    elif check_command yum; then echo "yum"
-    elif check_command zypper; then echo "zypper"
-    elif check_command pacman; then echo "pacman"
-    else echo ""
-    fi
-}
-
-install_packages() {
-    local pkgs=("$@")
-    local pmgr
-    pmgr=$(detect_pkg_manager)
-    if [[ -z "$pmgr" ]]; then
-        log "No supported package manager found. Please install manually: ${pkgs[*]}"
-        exit 1
-    fi
-
-    log "Installing packages: ${pkgs[*]}"
-    case "$pmgr" in
-        apt-get) apt-get update >>"$LOGFILE" 2>&1 && apt-get install -y "${pkgs[@]}" >>"$LOGFILE" 2>&1 ;;
-        dnf) dnf install -y "${pkgs[@]}" >>"$LOGFILE" 2>&1 ;;
-        yum) yum install -y "${pkgs[@]}" >>"$LOGFILE" 2>&1 ;;
-        zypper) zypper install -y "${pkgs[@]}" >>"$LOGFILE" 2>&1 ;;
-        pacman) pacman -Sy --noconfirm "${pkgs[@]}" >>"$LOGFILE" 2>&1 ;;
-    esac
-
-    INSTALLED_PACKAGES+=("${pkgs[@]}")
-}
-
-ensure_dependency() {
-    local dep="$1"
-    if ! check_command "$dep"; then
-        dialog --yesno "The required package '$dep' is not installed.\n\nInstall it now?" 10 50
-        if [[ $? -eq 0 ]]; then
-            install_packages "$dep"
+function check_dialog() {
+    if ! command -v dialog >/dev/null 2>&1; then
+        read -rp "'dialog' is not installed. Install it now? [Y/n] " yn
+        yn=${yn:-Y}
+        if [[ "$yn" =~ ^[Yy]$ ]]; then
+            apt-get update && apt-get install -y dialog
         else
-            log "User declined installation of $dep. Exiting."
+            echo "Cannot proceed without 'dialog'. Exiting."
             exit 1
         fi
     fi
 }
 
-backup_config() {
-    mkdir -p "$BACKUP_DIR"
-    if [[ -f "$CONFIG_FILE" ]]; then
-        local ts
-        ts=$(date '+%Y%m%d-%H%M%S')
-        cp "$CONFIG_FILE" "$BACKUP_DIR/6tunnel-config.$ts.bak"
-        log "Backup of config created: $BACKUP_DIR/6tunnel-config.$ts.bak"
+function check_6tunnel() {
+    if ! command -v 6tunnel >/dev/null 2>&1; then
+        read -rp "'6tunnel' is not installed. Install it now? [Y/n] " yn
+        yn=${yn:-Y}
+        if [[ "$yn" =~ ^[Yy]$ ]]; then
+            apt-get update && apt-get install -y 6tunnel
+        else
+            echo "Cannot proceed without '6tunnel'. Exiting."
+            exit 1
+        fi
     fi
 }
 
-generate_start_script() {
-    echo "#!/bin/bash" > "$SERVICE_SCRIPT"
-    while read -r SRC TARGET TPORT; do
-        [[ -z "$SRC" || -z "$TARGET" || -z "$TPORT" ]] && continue
-        echo "6tunnel $SRC $TARGET $TPORT" >> "$SERVICE_SCRIPT"
-    done < "$CONFIG_FILE"
-    chmod +x "$SERVICE_SCRIPT"
+function show_about() {
+    dialog --title "About" --msgbox "6tunnel-setup\nVersion: $VERSION\nAuthor: dehsgr\nLicense: ISC" 10 50
 }
 
-create_service() {
-cat <<EOF > "$SYSTEMD_UNIT"
+function backup_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        cp "$CONFIG_FILE" "$BACKUP_FILE"
+    fi
+}
+
+function create_systemd_service() {
+    cat > "$SYSTEMD_UNIT" <<EOF
 [Unit]
-Description=6tunnel Startup Script
+Description=6tunnel Setup Service
+After=network.target
 
 [Service]
-Type=oneshot
-ExecStart=$SERVICE_SCRIPT
-RemainAfterExit=true
+ExecStart=/bin/bash -c '/usr/bin/awk "{print \"/usr/bin/6tunnel \" \$1 \" \" \$2 \" \" \$3}"' "$CONFIG_FILE" | /bin/bash
+Restart=always
+User=root
 
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable 6tunnel-start.service
 }
 
-do_install() {
-    ensure_dependency 6tunnel
+function install() {
     backup_config
-    : > "$CONFIG_FILE"
-
+    local entries=""
     while true; do
-        SRC_PORT=$(dialog --inputbox "Enter source port (leave blank to finish):" 10 50 3>&1 1>&2 2>&3)
-        [[ $? -ne 0 || -z "$SRC_PORT" ]] && break
-        if ! [[ "$SRC_PORT" =~ ^[0-9]+$ ]]; then
-            dialog --msgbox "Invalid source port." 8 50
-            continue
+        local result=$(dialog --stdout --title "New Tunnel" \
+            --form "Enter tunnel configuration (leave empty Source port to finish):" 15 50 3 \
+            "Source port:" 1 1 "" 1 20 5 0 \
+            "Target address:" 2 1 "" 2 20 30 0 \
+            "Target port:" 3 1 "" 3 20 5 0)
+        if [ -z "$result" ]; then
+            break
         fi
-
-        TARGET_ADDR=$(dialog --inputbox "Enter target IP/hostname:" 10 50 3>&1 1>&2 2>&3)
-        [[ $? -ne 0 || -z "$TARGET_ADDR" ]] && break
-
-        TARGET_PORT=$(dialog --inputbox "Enter target port:" 10 50 3>&1 1>&2 2>&3)
-        [[ $? -ne 0 || -z "$TARGET_PORT" ]] && break
-        if ! [[ "$TARGET_PORT" =~ ^[0-9]+$ ]]; then
-            dialog --msgbox "Invalid target port." 8 50
-            continue
+        local src=$(echo "$result" | sed -n 1p)
+        if [ -z "$src" ]; then
+            break
         fi
-
-        echo "$SRC_PORT $TARGET_ADDR $TARGET_PORT" >> "$CONFIG_FILE"
+        local tgt_addr=$(echo "$result" | sed -n 2p)
+        local tgt_port=$(echo "$result" | sed -n 3p)
+        entries+="$src $tgt_addr $tgt_port\n"
     done
-
-    if [[ -s "$CONFIG_FILE" ]]; then
-        generate_start_script
-        create_service
-        log "Installation completed."
-        dialog --msgbox "Installation completed. Service enabled." 8 50
+    if [ -n "$entries" ]; then
+        echo -e "$entries" > "$CONFIG_FILE"
+        create_systemd_service
+        systemctl daemon-reload
+        systemctl enable --now 6tunnel-setup.service
+        dialog --msgbox "Installation complete and service started." 6 40
     else
-        rm -f "$CONFIG_FILE" "$SERVICE_SCRIPT"
-        log "No entries entered. Installation aborted."
-        dialog --msgbox "No entries entered. Installation aborted." 8 50
+        dialog --msgbox "No tunnels configured." 6 40
     fi
 }
 
-do_modify() {
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        dialog --msgbox "No configuration found. Please install first." 8 50
+function modify() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        dialog --msgbox "No configuration found." 6 40
         return
     fi
-    backup_config
-
-    NEW=$(dialog --editbox "$CONFIG_FILE" 20 70 3>&1 1>&2 2>&3)
-    if [[ $? -eq 0 ]]; then
-        VALID=1
-        while read -r line; do
-            [[ -z "$line" ]] && continue
-            if ! [[ "$line" =~ ^[0-9]+\ +[^ ]+\ +[0-9]+$ ]]; then
-                VALID=0
-                dialog --msgbox "Invalid line:\n$line\nChanges not saved." 10 50
-                break
-            fi
-        done <<< "$NEW"
-
-        if [[ $VALID -eq 1 ]]; then
-            echo "$NEW" > "$CONFIG_FILE"
-            generate_start_script
-            log "Configuration modified."
-            dialog --msgbox "Configuration updated." 8 50
+    local new_entries=""
+    while read -r src tgt_addr tgt_port; do
+        local result=$(dialog --stdout --title "Edit Tunnel" \
+            --form "Modify tunnel configuration (leave Source port empty to delete):" 15 50 3 \
+            "Source port:" 1 1 "$src" 1 20 5 0 \
+            "Target address:" 2 1 "$tgt_addr" 2 20 30 0 \
+            "Target port:" 3 1 "$tgt_port" 3 20 5 0)
+        if [ -z "$result" ]; then
+            # If cancel pressed, keep old entry
+            new_entries+="$src $tgt_addr $tgt_port\n"
+            continue
         fi
+        local new_src=$(echo "$result" | sed -n 1p)
+        if [ -z "$new_src" ]; then
+            # empty source port means delete this entry
+            continue
+        fi
+        local new_tgt_addr=$(echo "$result" | sed -n 2p)
+        local new_tgt_port=$(echo "$result" | sed -n 3p)
+        new_entries+="$new_src $new_tgt_addr $new_tgt_port\n"
+    done < "$CONFIG_FILE"
+    if [ -n "$new_entries" ]; then
+        echo -e "$new_entries" > "$CONFIG_FILE"
+        systemctl restart 6tunnel-setup.service
+        dialog --msgbox "Configuration modified and service restarted." 6 50
+    else
+        dialog --msgbox "No tunnels left. Consider uninstalling." 6 50
     fi
 }
 
-do_uninstall() {
-    backup_config
-    systemctl disable 6tunnel-start.service
-    rm -f "$CONFIG_FILE" "$SERVICE_SCRIPT" "$SYSTEMD_UNIT"
+function uninstall() {
+    systemctl disable --now 6tunnel-setup.service || true
+    rm -f "$SYSTEMD_UNIT" "$CONFIG_FILE"
     systemctl daemon-reload
-
-    dialog --yesno "Do you also want to remove the installed dependencies (6tunnel, dialog)?" 10 50
-    if [[ $? -eq 0 ]]; then
-        local pmgr
-        pmgr=$(detect_pkg_manager)
-        case "$pmgr" in
-            apt-get) apt-get remove --purge -y 6tunnel dialog ;;
-            dnf) dnf remove -y 6tunnel dialog ;;
-            yum) yum remove -y 6tunnel dialog ;;
-            zypper) zypper remove -y 6tunnel dialog ;;
-            pacman) pacman -Rns --noconfirm 6tunnel dialog ;;
-        esac
-        log "Dependencies removed."
+    read -rp "Also remove dependencies ('6tunnel', 'dialog')? [y/N] " yn
+    if [[ "$yn" =~ ^[Yy]$ ]]; then
+        apt-get remove -y 6tunnel dialog
     fi
-
-    log "Uninstallation completed."
-    dialog --msgbox "Uninstallation completed." 8 50
+    dialog --msgbox "Uninstallation complete." 6 40
 }
 
-show_about() {
-    dialog --msgbox "6tunnel Setup Script\n\nVersion: $SCRIPT_VERSION\n\nCopyright (c) 2025 by dehsgr" \
-        12 50
-}
-
-main_menu() {
+function main_menu() {
     while true; do
-        MENU_ITEMS=()
-        MENU_ITEMS+=("1" "Install")
-
-        [[ -f "$CONFIG_FILE" ]] && MENU_ITEMS+=("2" "Modify configuration")
-        [[ -f "$CONFIG_FILE" || -f "$SYSTEMD_UNIT" ]] && MENU_ITEMS+=("3" "Uninstall")
-        MENU_ITEMS+=("4" "About")
-        MENU_ITEMS+=("5" "Exit")
-
-        CHOICE=$(dialog --clear --backtitle "6tunnel Setup v$SCRIPT_VERSION" \
-            --title "Main Menu" \
-            --menu "Choose an option:" 15 50 6 \
-            "${MENU_ITEMS[@]}" \
-            3>&1 1>&2 2>&3)
-
-        case "$CHOICE" in
-            1) do_install ;;
-            2) do_modify ;;
-            3) do_uninstall ;;
+        choice=$(dialog --clear --stdout --title "6tunnel-setup v$VERSION" \
+            --menu "Choose an option:" 15 50 5 \
+            1 "Install" \
+            2 "Modify configuration" \
+            3 "Uninstall" \
+            4 "About" \
+            5 "Exit")
+        case "$choice" in
+            1) install ;;
+            2) modify ;;
+            3) uninstall ;;
             4) show_about ;;
             5) clear; exit ;;
-            *) break ;;
+            *) clear; exit ;;
         esac
     done
 }
 
-# Start
 check_root
-ensure_dependency dialog
+check_dialog
+check_6tunnel
 main_menu

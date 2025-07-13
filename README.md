@@ -46,7 +46,7 @@ The script also takes care of required dependencies, optionally installs/uninsta
 Run the following **one-liner** as **root** to download and execute the script directly:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/dehsgr/6tunnel-setup/main/6tunnel-setup.sh)
+curl -fsSL -o /tmp/6tunnel-setup.sh https://raw.githubusercontent.com/dehsgr/6tunnel-setup/main/6tunnel-setup.sh && sudo bash /tmp/6tunnel-setup.sh
 ```
 
 Alternatively, clone the repository manually:
