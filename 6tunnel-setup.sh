@@ -132,32 +132,36 @@ function modify() {
         if [[ "$choice" == "0" || -z "$choice" ]]; then
             break
         elif [[ "$choice" == "a" ]]; then
-            new_result=$(dialog --stdout --form "Add new tunnel configuration:" 15 50 3 \
-                "Source port:" 1 1 "" 1 20 5 0 \
-                "Target address:" 2 1 "" 2 20 30 0 \
-                "Target port:" 3 1 "" 3 20 5 0)
-            if [ -z "$new_result" ]; then
-                dialog --msgbox "Add cancelled." 6 40
-                continue
-            fi
+            # Loop until valid or cancel
+            while true; do
+                new_result=$(dialog --stdout --form "Add new tunnel configuration:" 15 50 3 \
+                    "Source port:" 1 1 "" 1 20 5 0 \
+                    "Target address:" 2 1 "" 2 20 30 0 \
+                    "Target port:" 3 1 "" 3 20 5 0)
+                if [ -z "$new_result" ]; then
+                    dialog --msgbox "Add cancelled." 6 40
+                    break
+                fi
 
-            new_src=$(echo "$new_result" | sed -n 1p)
-            new_tgt_addr=$(echo "$new_result" | sed -n 2p)
-            new_tgt_port=$(echo "$new_result" | sed -n 3p)
+                new_src=$(echo "$new_result" | sed -n 1p)
+                new_tgt_addr=$(echo "$new_result" | sed -n 2p)
+                new_tgt_port=$(echo "$new_result" | sed -n 3p)
 
-            # Validation: all empty cancels, all filled required
-            if [[ -z "$new_src" && -z "$new_tgt_addr" && -z "$new_tgt_port" ]]; then
-                dialog --msgbox "Add cancelled." 6 40
-                continue
-            fi
-            if [[ -z "$new_src" || -z "$new_tgt_addr" || -z "$new_tgt_port" ]]; then
-                dialog --msgbox "All fields must be filled or all empty to cancel. Entry not added." 6 60
-                continue
-            fi
+                # Validation
+                if [[ -z "$new_src" && -z "$new_tgt_addr" && -z "$new_tgt_port" ]]; then
+                    dialog --msgbox "Add cancelled." 6 40
+                    break
+                fi
+                if [[ -z "$new_src" || -z "$new_tgt_addr" || -z "$new_tgt_port" ]]; then
+                    dialog --msgbox "All fields must be filled or all empty to cancel. Please complete all fields." 7 60
+                    continue
+                fi
 
-            echo "$new_src $new_tgt_addr $new_tgt_port" >> "$CONFIG_FILE"
-            restart_service
-            dialog --msgbox "New tunnel added and service restarted." 6 50
+                echo "$new_src $new_tgt_addr $new_tgt_port" >> "$CONFIG_FILE"
+                restart_service
+                dialog --msgbox "New tunnel added and service restarted." 6 50
+                break
+            done
 
         else
             line_content=$(sed -n "${choice}p" "$CONFIG_FILE")
@@ -168,33 +172,37 @@ function modify() {
             action=$(dialog --stdout --menu "Edit or delete the tunnel?\n$src → $tgt_addr:$tgt_port" 10 40 2 1 Edit 2 Delete)
 
             if [[ "$action" == "1" ]]; then
-                new_result=$(dialog --stdout --form "Edit tunnel configuration:" 15 50 3 \
-                    "Source port:" 1 1 "$src" 1 20 5 0 \
-                    "Target address:" 2 1 "$tgt_addr" 2 20 30 0 \
-                    "Target port:" 3 1 "$tgt_port" 3 20 5 0)
+                # Loop until valid or cancel
+                while true; do
+                    new_result=$(dialog --stdout --form "Edit tunnel configuration:" 15 50 3 \
+                        "Source port:" 1 1 "$src" 1 20 5 0 \
+                        "Target address:" 2 1 "$tgt_addr" 2 20 30 0 \
+                        "Target port:" 3 1 "$tgt_port" 3 20 5 0)
 
-                if [ -z "$new_result" ]; then
-                    dialog --msgbox "Edit cancelled, entry unchanged." 6 40
-                    continue
-                fi
+                    if [ -z "$new_result" ]; then
+                        dialog --msgbox "Edit cancelled, entry unchanged." 6 40
+                        break
+                    fi
 
-                new_src=$(echo "$new_result" | sed -n 1p)
-                new_tgt_addr=$(echo "$new_result" | sed -n 2p)
-                new_tgt_port=$(echo "$new_result" | sed -n 3p)
+                    new_src=$(echo "$new_result" | sed -n 1p)
+                    new_tgt_addr=$(echo "$new_result" | sed -n 2p)
+                    new_tgt_port=$(echo "$new_result" | sed -n 3p)
 
-                # Validation: all empty cancels edit, all filled required
-                if [[ -z "$new_src" && -z "$new_tgt_addr" && -z "$new_tgt_port" ]]; then
-                    dialog --msgbox "Edit cancelled, entry unchanged." 6 40
-                    continue
-                fi
-                if [[ -z "$new_src" || -z "$new_tgt_addr" || -z "$new_tgt_port" ]]; then
-                    dialog --msgbox "All fields must be filled or all empty to cancel. Entry unchanged." 6 60
-                    continue
-                fi
+                    # Validation
+                    if [[ -z "$new_src" && -z "$new_tgt_addr" && -z "$new_tgt_port" ]]; then
+                        dialog --msgbox "Edit cancelled, entry unchanged." 6 40
+                        break
+                    fi
+                    if [[ -z "$new_src" || -z "$new_tgt_addr" || -z "$new_tgt_port" ]]; then
+                        dialog --msgbox "All fields must be filled or all empty to cancel. Please complete all fields." 7 60
+                        continue
+                    fi
 
-                sed -i "${choice}s/.*/$new_src $new_tgt_addr $new_tgt_port/" "$CONFIG_FILE"
-                restart_service
-                dialog --msgbox "Entry updated and service restarted." 6 50
+                    sed -i "${choice}s/.*/$new_src $new_tgt_addr $new_tgt_port/" "$CONFIG_FILE"
+                    restart_service
+                    dialog --msgbox "Entry updated and service restarted." 6 50
+                    break
+                done
 
             elif [[ "$action" == "2" ]]; then
                 sed -i "${choice}d" "$CONFIG_FILE"
