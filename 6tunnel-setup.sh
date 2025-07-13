@@ -74,6 +74,11 @@ WantedBy=multi-user.target
 EOF
 }
 
+function restart_service() {
+    systemctl daemon-reload
+    systemctl restart 6tunnel-setup.service
+}
+
 function install() {
     backup_config
     local entries=""
@@ -97,7 +102,6 @@ function install() {
     if [ -n "$entries" ]; then
         echo -e "$entries" > "$CONFIG_FILE"
         create_systemd_service
-        systemctl daemon-reload
         systemctl enable --now 6tunnel-setup.service
         dialog --msgbox "Installation complete and service started." 6 40
     else
@@ -114,40 +118,26 @@ function modify() {
     backup_config
 
     while true; do
-        # Build menu options: line numbers + current config for easy selection
         local options=()
         local i=1
         while read -r src tgt_addr tgt_port; do
             options+=("$i" "$src → $tgt_addr:$tgt_port")
             ((i++))
         done < "$CONFIG_FILE"
+        options+=("a" "Add new tunnel")
         options+=("0" "Done")
 
-        choice=$(dialog --stdout --menu "Select tunnel to edit or delete:" 20 60 10 "${options[@]}")
+        choice=$(dialog --stdout --menu "Select tunnel to edit/delete or add new:" 20 60 12 "${options[@]}")
 
         if [[ "$choice" == "0" || -z "$choice" ]]; then
-            # Exit modify menu
             break
-        fi
-
-        # Get selected line content
-        line_content=$(sed -n "${choice}p" "$CONFIG_FILE")
-        src=$(echo "$line_content" | awk '{print $1}')
-        tgt_addr=$(echo "$line_content" | awk '{print $2}')
-        tgt_port=$(echo "$line_content" | awk '{print $3}')
-
-        # Ask edit or delete
-        action=$(dialog --stdout --menu "Edit or delete the tunnel?\n$src → $tgt_addr:$tgt_port" 10 40 2 1 Edit 2 Delete)
-
-        if [[ "$action" == "1" ]]; then
-            # Edit
-            new_result=$(dialog --stdout --form "Edit tunnel configuration:" 15 50 3 \
-                "Source port:" 1 1 "$src" 1 20 5 0 \
-                "Target address:" 2 1 "$tgt_addr" 2 20 30 0 \
-                "Target port:" 3 1 "$tgt_port" 3 20 5 0)
-
+        elif [[ "$choice" == "a" ]]; then
+            new_result=$(dialog --stdout --form "Add new tunnel configuration:" 15 50 3 \
+                "Source port:" 1 1 "" 1 20 5 0 \
+                "Target address:" 2 1 "" 2 20 30 0 \
+                "Target port:" 3 1 "" 3 20 5 0)
             if [ -z "$new_result" ]; then
-                dialog --msgbox "Edit cancelled, entry unchanged." 6 40
+                dialog --msgbox "Add cancelled." 6 40
                 continue
             fi
 
@@ -155,16 +145,47 @@ function modify() {
             new_tgt_addr=$(echo "$new_result" | sed -n 2p)
             new_tgt_port=$(echo "$new_result" | sed -n 3p)
 
-            # Replace line in config
-            sed -i "${choice}s/.*/$new_src $new_tgt_addr $new_tgt_port/" "$CONFIG_FILE"
-            systemctl restart 6tunnel-setup.service
-            dialog --msgbox "Entry updated and service restarted." 6 50
+            if [[ -z "$new_src" || -z "$new_tgt_addr" || -z "$new_tgt_port" ]]; then
+                dialog --msgbox "All fields are required. Entry not added." 6 50
+                continue
+            fi
 
-        elif [[ "$action" == "2" ]]; then
-            # Delete
-            sed -i "${choice}d" "$CONFIG_FILE"
-            systemctl restart 6tunnel-setup.service
-            dialog --msgbox "Entry deleted and service restarted." 6 50
+            echo "$new_src $new_tgt_addr $new_tgt_port" >> "$CONFIG_FILE"
+            restart_service
+            dialog --msgbox "New tunnel added and service restarted." 6 50
+
+        else
+            line_content=$(sed -n "${choice}p" "$CONFIG_FILE")
+            src=$(echo "$line_content" | awk '{print $1}')
+            tgt_addr=$(echo "$line_content" | awk '{print $2}')
+            tgt_port=$(echo "$line_content" | awk '{print $3}')
+
+            action=$(dialog --stdout --menu "Edit or delete the tunnel?\n$src → $tgt_addr:$tgt_port" 10 40 2 1 Edit 2 Delete)
+
+            if [[ "$action" == "1" ]]; then
+                new_result=$(dialog --stdout --form "Edit tunnel configuration:" 15 50 3 \
+                    "Source port:" 1 1 "$src" 1 20 5 0 \
+                    "Target address:" 2 1 "$tgt_addr" 2 20 30 0 \
+                    "Target port:" 3 1 "$tgt_port" 3 20 5 0)
+
+                if [ -z "$new_result" ]; then
+                    dialog --msgbox "Edit cancelled, entry unchanged." 6 40
+                    continue
+                fi
+
+                new_src=$(echo "$new_result" | sed -n 1p)
+                new_tgt_addr=$(echo "$new_result" | sed -n 2p)
+                new_tgt_port=$(echo "$new_result" | sed -n 3p)
+
+                sed -i "${choice}s/.*/$new_src $new_tgt_addr $new_tgt_port/" "$CONFIG_FILE"
+                restart_service
+                dialog --msgbox "Entry updated and service restarted." 6 50
+
+            elif [[ "$action" == "2" ]]; then
+                sed -i "${choice}d" "$CONFIG_FILE"
+                restart_service
+                dialog --msgbox "Entry deleted and service restarted." 6 50
+            fi
         fi
     done
 }
