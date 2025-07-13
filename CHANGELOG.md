@@ -10,5 +10,3 @@
 - Automatically checks for and optionally installs required dependencies (`6tunnel`, `dialog`).
 - Automatically cleans up and optionally removes dependencies during uninstallation.
 - Backups the current configuration on every change.
-- Version number included and shown in the About dialog.
-- Supports localization in English (en-us).
