@@ -54,11 +54,12 @@ function show_about() {
 
 function backup_config() {
     if [ -f "$CONFIG_FILE" ]; then
-        cp "$CONFIG_FILE" "$BACKUP_FILE"
+        timestamp=$(date +"%Y%m%d_%H%M%S")
+        cp "$CONFIG_FILE" "${BACKUP_FILE}.${timestamp}"
     fi
 }
 
-function create_systemd_service() {
+function create_service() {
     cat > "$SYSTEMD_UNIT" <<EOF
 [Unit]
 Description=6tunnel Setup Service
@@ -80,38 +81,27 @@ function restart_service() {
 }
 
 function install() {
-    backup_config
-    local entries=""
-    while true; do
-        local result=$(dialog --stdout --title "New Tunnel" \
-            --form "Enter tunnel configuration (leave empty Source port to finish):" 15 50 3 \
-            "Source port:" 1 1 "" 1 20 5 0 \
-            "Target address:" 2 1 "" 2 20 30 0 \
-            "Target port:" 3 1 "" 3 20 5 0)
-        if [ -z "$result" ]; then
-            break
-        fi
-        local src=$(echo "$result" | sed -n 1p)
-        if [ -z "$src" ]; then
-            break
-        fi
-        local tgt_addr=$(echo "$result" | sed -n 2p)
-        local tgt_port=$(echo "$result" | sed -n 3p)
-        entries+="$src $tgt_addr $tgt_port\n"
-    done
-    if [ -n "$entries" ]; then
-        echo -e "$entries" > "$CONFIG_FILE"
-        create_systemd_service
-        systemctl enable --now 6tunnel-setup.service
-        dialog --msgbox "Installation complete and service started." 6 40
-    else
-        dialog --msgbox "No tunnels configured." 6 40
+    check_root
+    check_6tunnel
+    check_dialog
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        touch "$CONFIG_FILE"
     fi
+
+    create_service
+    systemctl enable --now 6tunnel-setup.service
+
+    dialog --msgbox "Service installed and enabled.\nConfig file created (or already exists):\n$CONFIG_FILE" 8 60
 }
 
 function modify() {
+    check_root
+    check_dialog
+    check_6tunnel
+
     if [ ! -f "$CONFIG_FILE" ]; then
-        dialog --msgbox "No configuration found." 6 40
+        dialog --msgbox "No configuration found. Please install the service first." 6 50
         return
     fi
 
@@ -125,19 +115,22 @@ function modify() {
             ((i++))
         done < "$CONFIG_FILE"
         options+=("a" "Add new tunnel")
-        options+=("0" "Done")
+        options+=("0" "Done editing")
 
-        choice=$(dialog --stdout --menu "Select tunnel to edit/delete or add new:" 20 60 12 "${options[@]}")
+        choice=$(dialog --stdout --menu "Edit your tunnel configuration file:\n$CONFIG_FILE\nSelect tunnel to edit/delete or add new:" 20 70 12 "${options[@]}")
 
         if [[ "$choice" == "0" || -z "$choice" ]]; then
             break
         elif [[ "$choice" == "a" ]]; then
-            # Loop until valid or cancel
+            local new_src=""
+            local new_tgt_addr=""
+            local new_tgt_port=""
             while true; do
                 new_result=$(dialog --stdout --form "Add new tunnel configuration:" 15 50 3 \
-                    "Source port:" 1 1 "" 1 20 5 0 \
-                    "Target address:" 2 1 "" 2 20 30 0 \
-                    "Target port:" 3 1 "" 3 20 5 0)
+                    "Source port:" 1 1 "$new_src" 1 20 5 0 \
+                    "Target address:" 2 1 "$new_tgt_addr" 2 20 30 0 \
+                    "Target port:" 3 1 "$new_tgt_port" 3 20 5 0)
+
                 if [ -z "$new_result" ]; then
                     dialog --msgbox "Add cancelled." 6 40
                     break
@@ -147,7 +140,6 @@ function modify() {
                 new_tgt_addr=$(echo "$new_result" | sed -n 2p)
                 new_tgt_port=$(echo "$new_result" | sed -n 3p)
 
-                # Validation
                 if [[ -z "$new_src" && -z "$new_tgt_addr" && -z "$new_tgt_port" ]]; then
                     dialog --msgbox "Add cancelled." 6 40
                     break
@@ -172,33 +164,34 @@ function modify() {
             action=$(dialog --stdout --menu "Edit or delete the tunnel?\n$src → $tgt_addr:$tgt_port" 10 40 2 1 Edit 2 Delete)
 
             if [[ "$action" == "1" ]]; then
-                # Loop until valid or cancel
+                local edit_src="$src"
+                local edit_tgt_addr="$tgt_addr"
+                local edit_tgt_port="$tgt_port"
                 while true; do
                     new_result=$(dialog --stdout --form "Edit tunnel configuration:" 15 50 3 \
-                        "Source port:" 1 1 "$src" 1 20 5 0 \
-                        "Target address:" 2 1 "$tgt_addr" 2 20 30 0 \
-                        "Target port:" 3 1 "$tgt_port" 3 20 5 0)
+                        "Source port:" 1 1 "$edit_src" 1 20 5 0 \
+                        "Target address:" 2 1 "$edit_tgt_addr" 2 20 30 0 \
+                        "Target port:" 3 1 "$edit_tgt_port" 3 20 5 0)
 
                     if [ -z "$new_result" ]; then
                         dialog --msgbox "Edit cancelled, entry unchanged." 6 40
                         break
                     fi
 
-                    new_src=$(echo "$new_result" | sed -n 1p)
-                    new_tgt_addr=$(echo "$new_result" | sed -n 2p)
-                    new_tgt_port=$(echo "$new_result" | sed -n 3p)
+                    edit_src=$(echo "$new_result" | sed -n 1p)
+                    edit_tgt_addr=$(echo "$new_result" | sed -n 2p)
+                    edit_tgt_port=$(echo "$new_result" | sed -n 3p)
 
-                    # Validation
-                    if [[ -z "$new_src" && -z "$new_tgt_addr" && -z "$new_tgt_port" ]]; then
+                    if [[ -z "$edit_src" && -z "$edit_tgt_addr" && -z "$edit_tgt_port" ]]; then
                         dialog --msgbox "Edit cancelled, entry unchanged." 6 40
                         break
                     fi
-                    if [[ -z "$new_src" || -z "$new_tgt_addr" || -z "$new_tgt_port" ]]; then
+                    if [[ -z "$edit_src" || -z "$edit_tgt_addr" || -z "$edit_tgt_port" ]]; then
                         dialog --msgbox "All fields must be filled or all empty to cancel. Please complete all fields." 7 60
                         continue
                     fi
 
-                    sed -i "${choice}s/.*/$new_src $new_tgt_addr $new_tgt_port/" "$CONFIG_FILE"
+                    sed -i "${choice}s/.*/$edit_src $edit_tgt_addr $edit_tgt_port/" "$CONFIG_FILE"
                     restart_service
                     dialog --msgbox "Entry updated and service restarted." 6 50
                     break
@@ -214,32 +207,35 @@ function modify() {
 }
 
 function uninstall() {
+    check_root
     systemctl disable --now 6tunnel-setup.service || true
     rm -f "$SYSTEMD_UNIT" "$CONFIG_FILE"
     systemctl daemon-reload
-    read -rp "Also remove dependencies ('6tunnel', 'dialog')? [y/N] " yn
-    if [[ "$yn" =~ ^[Yy]$ ]]; then
-        apt-get remove -y 6tunnel dialog
+    dialog --yesno "Do you want to remove '6tunnel' and 'dialog' packages as well?" 7 60
+    if [ $? -eq 0 ]; then
+        apt-get remove --purge -y 6tunnel dialog
     fi
     dialog --msgbox "Uninstallation complete." 6 40
 }
 
 function main_menu() {
     while true; do
-        choice=$(dialog --clear --stdout --title "6tunnel-setup v$VERSION" \
-            --menu "Choose an option:" 15 50 5 \
-            1 "Install" \
-            2 "Modify configuration" \
-            3 "Uninstall" \
+        check_dialog
+
+        choice=$(dialog --stdout --title "6tunnel Setup - v$VERSION" --menu "Choose an option:" 15 70 6 \
+            1 "Install service (creates config file, enables service)" \
+            2 "Edit tunnel configuration file" \
+            3 "Uninstall service and config" \
             4 "About" \
-            5 "Exit")
+            0 "Exit")
+
         case "$choice" in
             1) install ;;
             2) modify ;;
             3) uninstall ;;
             4) show_about ;;
-            5) clear; exit ;;
-            *) clear; exit ;;
+            0|"") break ;;
+            *) dialog --msgbox "Invalid option." 5 30 ;;
         esac
     done
 }
