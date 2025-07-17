@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="1.1.1"
+VERSION="1.1.0"
 CONFIG_FILE="/etc/6tunnel-setup.conf"
 BACKUP_FILE="/etc/6tunnel-setup.conf.bak"
 SYSTEMD_UNIT="/etc/systemd/system/6tunnel-setup.service"
