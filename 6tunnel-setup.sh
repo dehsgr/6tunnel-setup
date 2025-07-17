@@ -124,10 +124,13 @@ function modify() {
         options+=("a" "Add new tunnel")
         options+=("0" "Done editing")
 
+		set +e
         choice=$(dialog --stdout --menu "Edit your tunnel configuration file:\n$CONFIG_FILE\nSelect tunnel to edit/delete or add new:" 20 70 12 "${options[@]}")
-        if [[ $? -ne 0 ]]; then
-            break
-        fi
+		ret=$?
+		set -e
+		if [[ $ret -ne 0 ]]; then
+			break
+		fi
 
         case "$choice" in
             0) break ;;
@@ -135,12 +138,15 @@ function modify() {
             a)
                 local new_src="" new_tgt_addr="" new_tgt_port="" new_name=""
                 while true; do
+					set +e
                     new_result=$(dialog --stdout --form "Add new tunnel configuration:" 15 50 4 \
                         "Source port:" 1 1 "$new_src" 1 20 5 0 \
                         "Target address:" 2 1 "$new_tgt_addr" 2 20 30 0 \
                         "Target port:" 3 1 "$new_tgt_port" 3 20 5 0 \
                         "Name (optional):" 4 1 "$new_name" 4 20 20 0)
-                    if [[ $? -ne 0 || -z "$new_result" ]]; then
+					ret=$?
+					set -e
+                    if [[ $ret -ne 0 || -z "$new_result" ]]; then
                         break
                     fi
                     new_src=$(echo "$new_result" | sed -n 1p)
@@ -165,21 +171,32 @@ function modify() {
                 tgt_addr=$(echo "$line_content" | awk '{print $2}')
                 tgt_port=$(echo "$line_content" | awk '{print $3}')
                 name=$(echo "$line_content" | cut -d' ' -f4- | sed 's/^"\(.*\)"$/\1/')
+				if [ -n "$name" ]; then
+					display_name="$name"
+				else
+					display_name="$src → $tgt_addr:$tgt_port"
+				fi
 
-                action=$(dialog --stdout --menu "Edit or delete the tunnel?\n$src → $tgt_addr:$tgt_port" 10 40 2 1 Edit 2 Delete)
-                if [[ $? -ne 0 ]]; then
+				set +e
+                action=$(dialog --stdout --menu "Edit or delete the tunnel?\n$display_name" 10 40 2 1 Edit 2 Delete)
+				ret=$?
+				set -e
+                if [[ $ret -ne 0 ]]; then
                     continue
                 fi
 
                 if [[ "$action" == "1" ]]; then
                     local edit_src="$src" edit_tgt_addr="$tgt_addr" edit_tgt_port="$tgt_port" edit_name="$name"
                     while true; do
+						set +e
                         new_result=$(dialog --stdout --form "Edit tunnel configuration:" 15 50 4 \
                             "Source port:" 1 1 "$edit_src" 1 20 5 0 \
                             "Target address:" 2 1 "$edit_tgt_addr" 2 20 30 0 \
                             "Target port:" 3 1 "$edit_tgt_port" 3 20 5 0 \
                             "Name (optional):" 4 1 "$edit_name" 4 20 20 0)
-                        if [[ $? -ne 0 || -z "$new_result" ]]; then
+						ret=$?
+						set -e
+                        if [[ $ret -ne 0 || -z "$new_result" ]]; then
                             break
                         fi
                         edit_src=$(echo "$new_result" | sed -n 1p)
@@ -247,29 +264,27 @@ function main_menu() {
         case "$choice" in
             1)
                 if [ "$installed" -eq 1 ]; then
-                    dialog --msgbox "Service is already installed. Please uninstall first if you want to reinstall." 7 50
+                    dialog --msgbox "Service is already installed. Please uninstall first if you want to reinstall." 7 50 || true
                 else
                     install
                 fi
                 ;;
             2)
                 if [ "$installed" -eq 0 ]; then
-                    dialog --msgbox "No configuration found. Please install the service first." 7 50
+                    dialog --msgbox "No configuration found. Please install the service first." 7 50 || true
                 else
                     modify
                 fi
                 ;;
             3)
                 if [ "$installed" -eq 0 ]; then
-                    dialog --msgbox "Nothing to uninstall. Service is not installed." 7 50
+                    dialog --msgbox "Nothing to uninstall. Service is not installed." 7 50 || true
                 else
                     uninstall
                 fi
                 ;;
             4) show_about ;;
             0) break ;;
-            "") continue ;;
-            *) dialog --msgbox "Invalid option." 5 30 ;;
         esac
     done
 }
