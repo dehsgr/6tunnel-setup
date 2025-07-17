@@ -10,3 +10,10 @@
 - Automatically checks for and optionally installs required dependencies (`6tunnel`, `dialog`).
 - Automatically cleans up and optionally removes dependencies during uninstallation.
 - Backups the current configuration on every change.
+
+## [1.1.0] – 2025-07-17
+### Added
+- Display of **name** in the tunnel configuration edit menu if new name field is specified for the tunnel.
+
+### Fixed
+- Canceling or pressing ESC in some dialogs causes the script to exit instead of returning to the menu.
