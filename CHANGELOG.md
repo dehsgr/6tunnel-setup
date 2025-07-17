@@ -17,3 +17,7 @@
 
 ### Fixed
 - Canceling or pressing ESC in some dialogs causes the script to exit instead of returning to the menu.
+
+## [1.2.0] – 2025-07-17
+### Fixed
+- 6tunnels weren't fired up correctly. Whole systemd unit revised.

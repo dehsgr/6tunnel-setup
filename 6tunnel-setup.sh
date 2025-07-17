@@ -1,9 +1,12 @@
 #!/bin/bash
 
-VERSION="1.1.0"
+VERSION="1.2.0"
+
 CONFIG_FILE="/etc/6tunnel-setup.conf"
 BACKUP_FILE="/etc/6tunnel-setup.conf.bak"
-SYSTEMD_UNIT="/etc/systemd/system/6tunnel-setup.service"
+SERVICE_NAME="6tunnel-setup.service"
+SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
+LAUNCHER_SCRIPT="/usr/local/bin/6tunnel-launcher.sh"
 
 set -e
 
@@ -57,20 +60,65 @@ function backup_config() {
     fi
 }
 
-function create_service() {
-    cat > "$SYSTEMD_UNIT" <<EOF
+create_service() {
+    if [ ! -f "$LAUNCHER_SCRIPT" ]; then
+        cat <<EOF > "$LAUNCHER_SCRIPT"
+#!/bin/bash
+
+CONFIG_FILE="$CONFIG_FILE"
+PID_FILE="/run/6tunnel-pids"
+
+cleanup() {
+    echo "Stopping all 6tunnel processes…"
+    if [[ -f "\$PID_FILE" ]]; then
+        while read -r pid; do
+            kill "\$pid" 2>/dev/null
+        done < "\$PID_FILE"
+        rm -f "\$PID_FILE"
+    fi
+    exit 0
+}
+
+trap cleanup SIGINT SIGTERM
+
+echo "Starting 6tunnel processes…"
+> "\$PID_FILE"
+
+while read -r src addr port name; do
+    [[ -z "\$src" ]] && continue
+    echo "Starting 6tunnel: \$src -> \$addr:\$port"
+    /usr/bin/6tunnel "\$src" "\$addr" "\$port" &
+    echo \$! >> "\$PID_FILE"
+done < "\$CONFIG_FILE"
+
+echo "All tunnels started."
+
+# Keep the process alive so systemd can track it
+tail -f /dev/null
+EOF
+
+        chmod +x "$LAUNCHER_SCRIPT"
+    fi
+
+    cat <<EOF > "$SERVICE_FILE"
 [Unit]
 Description=6tunnel Setup Service
 After=network.target
 
 [Service]
-ExecStart=/bin/bash -c '/usr/bin/awk "{print \\"/usr/bin/6tunnel \\" \$1 \\" \\" \$2 \\" \\" \$3}"' "$CONFIG_FILE" | /bin/bash
-Restart=always
-User=root
+Type=simple
+Environment=CONFIG_FILE=$CONFIG_FILE
+ExecStart=$LAUNCHER_SCRIPT
+ExecStop=/bin/kill -s TERM \$MAINPID
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+    systemctl daemon-reload
+    systemctl enable "$SERVICE_NAME"
+    echo "Service $SERVICE_NAME wurde erstellt und aktiviert."
 }
 
 function restart_service() {
@@ -227,7 +275,7 @@ function modify() {
 function uninstall() {
     check_root
     systemctl disable --now 6tunnel-setup.service || true
-    rm -f "$SYSTEMD_UNIT" "$CONFIG_FILE"
+    rm -f "$SERVICE_FILE" "$CONFIG_FILE" "$LAUNCHER_SCRIPT"
     systemctl daemon-reload
     if dialog --yesno "Do you want to remove '6tunnel' and 'dialog' packages as well?" 7 60; then
         apt-get remove --purge -y 6tunnel dialog
@@ -242,7 +290,7 @@ function main_menu() {
         local options=()
         local installed=0
 
-        if [ -f "$SYSTEMD_UNIT" ] && [ -f "$CONFIG_FILE" ]; then
+        if [ -f "$SERVICE_FILE" ] || [ -f "$LAUNCHER_SCRIPT" ] || [ -f "$CONFIG_FILE" ]; then
             installed=1
         fi
 
